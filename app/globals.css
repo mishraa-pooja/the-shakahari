@@ -1,0 +1,198 @@
+/**
+ * Global styles: theme, fonts, and full-page brand texture.
+ */
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --forest: #1b3d2f;
+  --gold: #c9a84c;
+  --gold-light: #d4b96a;
+  --gold-dark: #a88b3a;
+
+  /* Brand palette (premium) */
+  --brand-green: #0e2a22;
+  --brand-green-2: #123227;
+  --brand-gold: #d6b15b;
+  --brand-gold-soft: rgba(214, 177, 91, 0.85);
+
+  /* Brand serif font (from next/font/google variable) */
+  --brand-serif: var(--font-brand-serif), var(--font-brand-serif-alt), "Trajan Pro", "Georgia", serif;
+  /* Heritage wordmark: Cinzel for regal, carved, temple feel */
+  --font-heritage: var(--font-cinzel), var(--font-brand-serif), "Trajan Pro", "Cinzel", "Georgia", serif;
+
+  /* Typography system */
+  --h1-size: clamp(34px, 4vw, 56px);
+  --h2-size: clamp(24px, 2.7vw, 36px);
+  --h3-size: clamp(18px, 2vw, 24px);
+  --body-size: 16px;
+  --small-size: 13px;
+}
+
+/* Main logo-wordmark style */
+.brand-wordmark {
+  font-family: var(--brand-serif);
+  text-transform: uppercase;
+  letter-spacing: 0.18em;
+  font-weight: 600;
+  line-height: 1;
+  color: var(--brand-gold);
+  text-shadow:
+    0 1px 0 rgba(0, 0, 0, 0.25),
+    0 10px 30px rgba(0, 0, 0, 0.35);
+  -webkit-font-smoothing: antialiased;
+  text-rendering: geometricPrecision;
+}
+
+.brand-wordmark span {
+  letter-spacing: 0.16em;
+}
+
+/* Subtitle under wordmark */
+.brand-subtitle {
+  margin-top: 10px;
+  font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif;
+  text-transform: uppercase;
+  letter-spacing: 0.28em;
+  font-size: 12px;
+  color: rgba(214, 177, 91, 0.75);
+}
+
+.brand-subtitle strong {
+  font-weight: 600;
+  color: rgba(214, 177, 91, 0.9);
+}
+
+/* Typography hierarchy */
+.h1 {
+  font-family: var(--brand-serif);
+  font-size: var(--h1-size);
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  line-height: 1.1;
+  color: var(--brand-gold);
+}
+
+.h2 {
+  font-family: var(--brand-serif);
+  font-size: var(--h2-size);
+  font-weight: 600;
+  letter-spacing: 0.01em;
+  line-height: 1.15;
+  color: rgba(214, 177, 91, 0.92);
+}
+
+.h3 {
+  font-family: var(--brand-serif);
+  font-size: var(--h3-size);
+  font-weight: 600;
+  letter-spacing: 0.01em;
+  line-height: 1.2;
+  color: rgba(214, 177, 91, 0.9);
+}
+
+.body {
+  font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif;
+  font-size: var(--body-size);
+  line-height: 1.6;
+  color: rgba(255, 255, 255, 0.8);
+}
+
+.small {
+  font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif;
+  font-size: var(--small-size);
+  line-height: 1.5;
+  letter-spacing: 0.02em;
+  color: rgba(255, 255, 255, 0.68);
+}
+
+/* Buttons */
+.btn-primary {
+  background: var(--brand-gold);
+  color: #13261f;
+  border: 1px solid rgba(214, 177, 91, 0.9);
+  padding: 12px 18px;
+  border-radius: 12px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  transition: filter 0.2s, transform 0.2s;
+}
+
+.btn-primary:hover {
+  filter: brightness(1.05);
+  transform: translateY(-1px);
+}
+
+.btn-ghost {
+  background: transparent;
+  color: var(--brand-gold);
+  border: 1px solid rgba(214, 177, 91, 0.55);
+  padding: 12px 18px;
+  border-radius: 12px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+}
+
+/* Responsive wordmark */
+@media (max-width: 768px) {
+  .brand-wordmark {
+    letter-spacing: 0.14em;
+  }
+  .brand-subtitle {
+    letter-spacing: 0.22em;
+    font-size: 11px;
+  }
+}
+
+/* Hero video: let the biryani pop, subtle cinematic zoom, no controls */
+.heroVideo {
+  animation: heroVideoZoom 25s ease-in-out infinite alternate;
+}
+
+.heroVideo video {
+  filter: brightness(0.9) contrast(1.08) saturate(1.08);
+  outline: none;
+}
+
+@keyframes heroVideoZoom {
+  from {
+    transform: scale(1);
+  }
+  to {
+    transform: scale(1.05);
+  }
+}
+
+/* Vignette overlay: darker edges, lighter behind text center */
+.heroOverlay {
+  background:
+    radial-gradient(ellipse 60% 50% at 50% 40%, rgba(0, 0, 0, 0.15), rgba(0, 0, 0, 0.65)),
+    radial-gradient(ellipse 100% 100% at 50% 50%, transparent 40%, rgba(0, 0, 0, 0.5) 100%),
+    linear-gradient(to bottom, rgba(0, 0, 0, 0.15) 0%, rgba(0, 0, 0, 0.30) 50%, rgba(0, 0, 0, 0.65) 100%);
+}
+
+.bg-shaka {
+  background-color: #0f2b21;
+  background-image:
+    radial-gradient(
+      circle at center,
+      rgba(201, 168, 76, 0.08) 0%,
+      rgba(15, 43, 33, 0.95) 70%
+    ),
+    url("/images/linen.webp");
+  background-repeat: no-repeat, repeat;
+  background-size: cover, 480px 480px;
+}
+
+body {
+  @apply text-gold antialiased;
+  background-attachment: fixed;
+}
+
+@layer base {
+  * {
+    @apply border-gold/20;
+  }
+}
