@@ -1,5 +1,6 @@
 /**
- * Footer: dark green, gold text, small logo, placeholder address, tagline, social placeholders.
+ * Footer: dark green, gold text, logo, tagline, contact placeholders, socials,
+ * and subtle legal / ownership line (Kaironovas Pvt Ltd).
  */
 
 import Image from "next/image";
@@ -12,7 +13,7 @@ export function Footer() {
         <div className="relative h-10 w-32">
           <Image
             src="/images/LogoSH.png"
-            alt="The Shaka-Hari"
+            alt="THE SHAKA-HARI"
             fill
             className="object-contain opacity-90"
             sizes="112px"
@@ -47,6 +48,11 @@ export function Footer() {
             <MapPin className="h-5 w-5" />
           </a>
         </div>
+
+        {/* Ownership — subtle, for verification & transparency */}
+        <p className="mt-2 max-w-xl border-t border-gold/10 pt-6 text-center text-xs leading-relaxed text-gold/45 sm:text-sm">
+          The Shaka-Hari is a brand owned and operated by Kaironovas Pvt Ltd.
+        </p>
       </div>
     </footer>
   );

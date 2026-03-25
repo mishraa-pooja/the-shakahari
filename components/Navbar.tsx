@@ -31,7 +31,7 @@ export function Navbar() {
         <div className="relative h-16 w-36 shrink-0 sm:w-48">
           <Image
             src="/images/LogoSH.png"
-            alt="The Shaka-Hari"
+            alt="THE SHAKA-HARI"
             fill
             className="object-contain object-left"
             priority

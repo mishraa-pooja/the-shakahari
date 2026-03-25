@@ -61,7 +61,7 @@ export function HeroVideoSection() {
           >
             <Image
               src="/images/LogoSH.png"
-              alt="Shaka-Hari"
+              alt="THE SHAKA-HARI"
               fill
               className="object-contain"
               priority

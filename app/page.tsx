@@ -4,6 +4,7 @@
 
 import { Navbar } from "@/components/Navbar";
 import { HeroVideoSection } from "@/components/HeroVideoSection";
+import { AboutSection } from "@/components/AboutSection";
 import { MenuSection } from "@/components/MenuSection";
 import { Footer } from "@/components/Footer";
 import { CartDrawer } from "@/components/CartDrawer";
@@ -14,6 +15,7 @@ export default function Home() {
     <main className="relative min-h-screen">
       <Navbar />
       <HeroVideoSection />
+      <AboutSection />
       <MenuSection />
       <Footer />
       <CartDrawer />
