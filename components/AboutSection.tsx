@@ -1,6 +1,5 @@
 /**
- * Minimal About strip between hero and menu.
- * Establishes brand + parent company context without corporate clutter.
+ * About strip — brand + Kaironovas ownership (verification-friendly copy).
  */
 
 export function AboutSection() {
@@ -16,11 +15,12 @@ export function AboutSection() {
         >
           About
         </h2>
-        <p className="mt-5 text-sm leading-relaxed text-gold/75 sm:text-base sm:leading-relaxed">
-          The Shaka-Hari is a premium veg dum biryani brand by Kaironovas,
-          focused on delivering rich, authentic, Andhra-inspired flavors.
+        <p className="mt-5 text-sm leading-relaxed text-gold/80 sm:text-base sm:leading-relaxed">
+          The Shaka-Hari is a premium veg dum biryani brand owned and operated
+          by Kaironovas Pvt Ltd, focused on delivering rich, authentic
+          Andhra-inspired flavors.
         </p>
-        <p className="mt-3 text-sm leading-relaxed text-gold/60 sm:text-base">
+        <p className="mt-4 text-sm leading-relaxed text-gold/75 sm:text-base">
           Pure vegetarian kitchen. Dum-cooked. Crafted for those who take veg
           seriously.
         </p>

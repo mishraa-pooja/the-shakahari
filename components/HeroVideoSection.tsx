@@ -96,6 +96,16 @@ export function HeroVideoSection() {
                 SHAKA-HARI
               </span>
             </div>
+            {/* Ownership — visible above the fold for business verification */}
+            <p
+              className="mt-2 text-center text-sm tracking-wide text-gold/70"
+              style={{
+                fontFamily:
+                  "var(--font-inter), ui-sans-serif, system-ui, sans-serif",
+              }}
+            >
+              A brand by Kaironovas Pvt Ltd
+            </p>
             <div
               className="mt-2 uppercase text-center"
               style={{

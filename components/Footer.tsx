@@ -49,10 +49,15 @@ export function Footer() {
           </a>
         </div>
 
-        {/* Ownership — subtle, for verification & transparency */}
-        <p className="mt-2 max-w-xl border-t border-gold/10 pt-6 text-center text-xs leading-relaxed text-gold/45 sm:text-sm">
-          The Shaka-Hari is a brand owned and operated by Kaironovas Pvt Ltd.
-        </p>
+        {/* Legal & ownership — readable for users and verification */}
+        <div className="mt-2 flex max-w-xl flex-col gap-3 border-t border-gold/20 pt-8 text-center">
+          <p className="text-sm leading-relaxed text-gold/80">
+            The Shaka-Hari is a brand owned and operated by Kaironovas Pvt Ltd.
+          </p>
+          <p className="text-sm font-medium text-gold/85">
+            © 2026 Kaironovas Pvt Ltd. All rights reserved.
+          </p>
+        </div>
       </div>
     </footer>
   );

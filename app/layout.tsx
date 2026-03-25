@@ -37,7 +37,7 @@ const inter = Inter({
 export const metadata: Metadata = {
   title: "THE SHAKA-HARI | Veg Dum Biryani Co.",
   description:
-    "Premium veg dum biryani by Kaironovas. Andhra-inspired flavors. Pure veg kitchen.",
+    "The Shaka-Hari — premium veg dum biryani, owned and operated by Kaironovas Pvt Ltd. Andhra-inspired flavors. Pure veg kitchen.",
 };
 
 export default function RootLayout({
