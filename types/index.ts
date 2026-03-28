@@ -7,6 +7,8 @@ export interface MenuItem {
   name: string;
   description: string;
   price: number;
+  /** Path under public/, e.g. /images/PaneerBiryani.png */
+  image?: string;
 }
 
 export interface CartItem extends MenuItem {
