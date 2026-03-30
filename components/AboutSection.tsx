@@ -2,6 +2,8 @@
  * About strip — brand + Kaironovas ownership (verification-friendly copy).
  */
 
+import Image from "next/image";
+
 export function AboutSection() {
   return (
     <section
@@ -9,6 +11,15 @@ export function AboutSection() {
       aria-labelledby="about-heading"
     >
       <div className="mx-auto max-w-2xl text-center">
+        <div className="relative mx-auto mb-6 h-16 w-40 sm:h-20 sm:w-48">
+          <Image
+            src="/images/LogoSH.png"
+            alt="THE SHAKA-HARI"
+            fill
+            className="object-contain object-center"
+            sizes="(max-width: 640px) 160px, 192px"
+          />
+        </div>
         <h2
           id="about-heading"
           className="font-playfair text-2xl font-semibold tracking-tight text-gold sm:text-3xl"

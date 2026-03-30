@@ -5,7 +5,7 @@
 "use client";
 
 import { useState } from "react";
-import { ShoppingBag, Plus, Minus, X } from "lucide-react";
+import { Plus, Minus, X } from "lucide-react";
 import { useCartStore } from "@/store/cartStore";
 import { Button } from "@/components/ui/button";
 import {
@@ -30,11 +30,11 @@ export function CartDrawer() {
   return (
     <>
       <Sheet open={isDrawerOpen} onOpenChange={setDrawerOpen}>
-        <SheetContent className="flex flex-col">
-          <SheetHeader>
+        <SheetContent side="center" className="flex flex-col p-0">
+          <SheetHeader className="shrink-0">
             <SheetTitle>Your Cart</SheetTitle>
           </SheetHeader>
-          <SheetBody className="flex flex-1 flex-col gap-4">
+          <SheetBody className="flex max-h-[min(60vh,420px)] flex-col gap-0 overflow-y-auto p-4">
             {items.length === 0 ? (
               <p className="py-8 text-center text-gold/70">
                 Your cart is empty. Add something from the menu!
@@ -93,7 +93,7 @@ export function CartDrawer() {
                     </li>
                   ))}
                 </ul>
-                <div className="mt-auto border-t border-gold/30 pt-4">
+                <div className="mt-4 border-t border-gold/30 pt-4">
                   <p className="flex justify-between text-lg font-semibold text-gold">
                     <span>Total</span>
                     <span>₹{total}</span>

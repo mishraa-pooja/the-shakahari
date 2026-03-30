@@ -2,7 +2,7 @@
  * WhatsApp Cloud API webhook (Meta).
  *
  * GET  — Meta verification (hub.mode, hub.verify_token, hub.challenge)
- * POST — Incoming messages → Supabase → optional auto-reply
+ * POST — Incoming messages → Supabase → routed auto-reply
  *
  * Deploy: set Callback URL to https://<your-domain>/api/webhooks/whatsapp
  *         subscribe to messages field in Meta app dashboard.
@@ -12,18 +12,10 @@ import { NextResponse } from "next/server";
 import { getSupabase, getSupabaseServiceRole } from "@/lib/supabase";
 import {
   sendWhatsAppMessage,
+  sendGreeting,
+  sendMenu,
   isLikelyOwnNumber,
 } from "@/lib/whatsapp";
-
-const AUTO_REPLY = `Hi! Welcome to The Shaka-Hari 🌿
-
-Please share:
-- Name
-- Address
-- Items
-
-Or order directly on our website:
-https://theshakahari.com`;
 
 /** Meta GET verification */
 export async function GET(request: Request) {
@@ -66,23 +58,20 @@ function getArray(obj: unknown, key: string): unknown[] {
   return Array.isArray(v) ? v : [];
 }
 
-/**
- * Extract inbound text messages from Meta payload (best-effort, no throw).
- */
-function extractInboundTextMessages(
-  body: unknown
-): Array<{
+type InboundMessage = {
   from: string;
   messageId: string;
   text: string;
   timestamp: string;
-}> {
-  const out: Array<{
-    from: string;
-    messageId: string;
-    text: string;
-    timestamp: string;
-  }> = [];
+  buttonReplyId: string;
+  listReplyId: string;
+};
+
+/**
+ * Extract inbound messages from Meta payload (text + interactive replies).
+ */
+function extractInboundMessages(body: unknown): InboundMessage[] {
+  const out: InboundMessage[] = [];
 
   try {
     const entries = getArray(body, "entry");
@@ -96,21 +85,44 @@ function extractInboundTextMessages(
         for (const msg of messages) {
           if (!isRecord(msg)) continue;
           const type = getString(msg, "type");
-          if (type !== "text") continue;
-          const textObj = msg.text;
-          const textBody =
-            isRecord(textObj) && typeof textObj.body === "string"
-              ? textObj.body
-              : "";
           const from = getString(msg, "from") ?? "";
           const id = getString(msg, "id") ?? "";
           const ts = getString(msg, "timestamp") ?? "";
           if (!from || !id) continue;
+
+          let text = "";
+          let buttonReplyId = "";
+          let listReplyId = "";
+
+          if (type === "text") {
+            const textObj = msg.text;
+            text =
+              isRecord(textObj) && typeof textObj.body === "string"
+                ? textObj.body
+                : "";
+          } else if (type === "interactive") {
+            const interactive = msg.interactive;
+            if (isRecord(interactive)) {
+              const btnReply = interactive.button_reply;
+              if (isRecord(btnReply)) {
+                buttonReplyId = getString(btnReply, "id") ?? "";
+              }
+              const lstReply = interactive.list_reply;
+              if (isRecord(lstReply)) {
+                listReplyId = getString(lstReply, "id") ?? "";
+              }
+            }
+          } else {
+            continue;
+          }
+
           out.push({
             from,
             messageId: id,
-            text: textBody,
+            text,
             timestamp: ts,
+            buttonReplyId,
+            listReplyId,
           });
         }
       }
@@ -122,6 +134,43 @@ function extractInboundTextMessages(
   return out;
 }
 
+const ORDER_LINK = "🛒 Order here: https://theshakahari.com";
+const LOCATION_MSG = `📍 The Shaka-Hari\n\nAddress: (coming soon)\nTimings: 12 PM – 3 PM (delivery only)\n\nOrder online: https://theshakahari.com`;
+
+async function routeReply(m: InboundMessage): Promise<void> {
+  const textLower = m.text.trim().toLowerCase();
+  const bid = m.buttonReplyId;
+  const lid = m.listReplyId;
+
+  if (
+    bid === "MENU" ||
+    lid.startsWith("ITEM_") ||
+    textLower === "1" ||
+    textLower === "menu"
+  ) {
+    const r = await sendMenu(m.from);
+    if (!r.ok) console.error("whatsapp webhook: sendMenu failed", r.error);
+    return;
+  }
+
+  if (bid === "ORDER" || textLower === "2" || textLower === "order") {
+    const r = await sendWhatsAppMessage(m.from, ORDER_LINK);
+    if (!r.ok)
+      console.error("whatsapp webhook: order link failed", r.error);
+    return;
+  }
+
+  if (bid === "LOCATION" || textLower === "3" || textLower === "location") {
+    const r = await sendWhatsAppMessage(m.from, LOCATION_MSG);
+    if (!r.ok)
+      console.error("whatsapp webhook: location msg failed", r.error);
+    return;
+  }
+
+  const r = await sendGreeting(m.from);
+  if (!r.ok) console.error("whatsapp webhook: greeting failed", r.error);
+}
+
 export async function POST(request: Request) {
   let body: unknown;
   try {
@@ -131,7 +180,7 @@ export async function POST(request: Request) {
     return NextResponse.json({ ok: false }, { status: 200 });
   }
 
-  const messages = extractInboundTextMessages(body);
+  const messages = extractInboundMessages(body);
   if (messages.length === 0) {
     return NextResponse.json({ ok: true, processed: 0 }, { status: 200 });
   }
@@ -150,12 +199,15 @@ export async function POST(request: Request) {
       continue;
     }
 
-    const { error: insertError } = await supabase.from("whatsapp_messages").insert({
-      phone: m.from,
-      message: m.text,
-      message_id: m.messageId,
-      timestamp: m.timestamp,
-    });
+    const dbText = m.text || m.buttonReplyId || m.listReplyId || "(interactive)";
+    const { error: insertError } = await supabase
+      .from("whatsapp_messages")
+      .insert({
+        phone: m.from,
+        message: dbText,
+        message_id: m.messageId,
+        timestamp: m.timestamp,
+      });
 
     if (insertError) {
       const code = String(insertError.code ?? "");
@@ -163,18 +215,20 @@ export async function POST(request: Request) {
         code === "23505" ||
         insertError.message?.toLowerCase().includes("duplicate");
       if (isDup) {
-        console.log("whatsapp webhook: duplicate message_id, skip reply", m.messageId);
+        console.log(
+          "whatsapp webhook: duplicate message_id, skip reply",
+          m.messageId
+        );
         continue;
       }
       console.error("whatsapp webhook: supabase insert", insertError);
-      continue;
     }
 
-    const send = await sendWhatsAppMessage(m.from, AUTO_REPLY);
-    if (!send.ok) {
-      console.error("whatsapp webhook: auto-reply failed", send.error);
-    }
+    await routeReply(m);
   }
 
-  return NextResponse.json({ ok: true, processed: messages.length }, { status: 200 });
+  return NextResponse.json(
+    { ok: true, processed: messages.length },
+    { status: 200 }
+  );
 }

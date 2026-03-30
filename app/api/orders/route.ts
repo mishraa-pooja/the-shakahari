@@ -1,11 +1,12 @@
 /**
- * POST /api/orders — validate payload, save to Supabase, return orderId.
+ * POST /api/orders — validate payload, detect first order, save to Supabase.
  */
 
 import { NextResponse } from "next/server";
 import { orderPayloadSchema } from "@/lib/validations";
-import { getSupabase } from "@/lib/supabase";
+import { getSupabase, getSupabaseServiceRole } from "@/lib/supabase";
 import { generateOrderId } from "@/lib/orderId";
+import { upsertCustomerOrderAnalytics } from "@/lib/customer-order-analytics";
 
 export async function POST(request: Request) {
   try {
@@ -23,6 +24,14 @@ export async function POST(request: Request) {
 
     try {
       const supabase = getSupabase();
+
+      const { count } = await supabase
+        .from("orders")
+        .select("id", { count: "exact", head: true })
+        .eq("phone", data.phone);
+
+      const isFirstOrder = (count ?? 0) === 0;
+
       const row = {
         order_id: orderId,
         name: data.name,
@@ -36,6 +45,8 @@ export async function POST(request: Request) {
         total: data.total,
         payment_method: data.paymentMethod,
         status: "pending",
+        is_first_order: isFirstOrder,
+        source: "website",
         latitude: data.latitude ?? null,
         longitude: data.longitude ?? null,
       };
@@ -48,6 +59,28 @@ export async function POST(request: Request) {
           { status: 500 }
         );
       }
+
+      const admin = getSupabaseServiceRole();
+      if (admin) {
+        const agg = await upsertCustomerOrderAnalytics(admin, {
+          phone: data.phone,
+          customerName: data.name,
+          items: data.items,
+        });
+        if (!agg.ok) {
+          console.warn("customer_order_analytics skipped:", agg.error);
+        }
+      } else {
+        console.warn(
+          "orders: SUPABASE_SERVICE_ROLE_KEY unset — customer_order_analytics not updated"
+        );
+      }
+
+      return NextResponse.json({
+        success: true,
+        orderId,
+        isFirstOrder,
+      });
     } catch (e) {
       console.error("Supabase error:", e);
       return NextResponse.json(
@@ -55,8 +88,6 @@ export async function POST(request: Request) {
         { status: 503 }
       );
     }
-
-    return NextResponse.json({ success: true, orderId });
   } catch (e) {
     console.error("Orders API error:", e);
     return NextResponse.json(

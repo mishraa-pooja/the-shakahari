@@ -191,6 +191,25 @@ body {
   background-attachment: fixed;
 }
 
+/* Cart control in navbar — draws attention when it has items */
+@keyframes cart-glow {
+  0%,
+  100% {
+    box-shadow:
+      0 0 0 0 rgba(201, 168, 76, 0.45),
+      0 0 12px rgba(201, 168, 76, 0.2);
+  }
+  50% {
+    box-shadow:
+      0 0 0 3px rgba(201, 168, 76, 0.25),
+      0 0 22px rgba(201, 168, 76, 0.45);
+  }
+}
+
+.cart-btn-has-items {
+  animation: cart-glow 2.2s ease-in-out infinite;
+}
+
 @layer base {
   * {
     @apply border-gold/20;

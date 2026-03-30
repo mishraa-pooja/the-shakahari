@@ -1,11 +1,17 @@
 "use client";
 
-import React from "react";
+import React, { useEffect, useState } from "react";
 import Image from "next/image";
 
 const MENU_SECTION_ID = "menu";
 
 export function HeroVideoSection() {
+  const [showVideo, setShowVideo] = useState(false);
+
+  useEffect(() => {
+    setShowVideo(true);
+  }, []);
+
   const scrollToMenu = (e: React.MouseEvent) => {
     e.preventDefault();
     document.getElementById(MENU_SECTION_ID)?.scrollIntoView({
@@ -18,18 +24,29 @@ export function HeroVideoSection() {
       className="relative w-full overflow-hidden"
       style={{ minHeight: "calc(100vh - 72px)" }}
     >
-      {/* Background video layer */}
+      {/* Background: poster SSR + first paint; video only after mount avoids hydration mismatch */}
       <div className="heroVideo absolute inset-0">
-        <video
-          className="h-full w-full object-cover"
-          src="/videos/paneer-hero.mp4"
-          poster="/images/Paneer-hero.png"
-          autoPlay
-          muted
-          loop
-          playsInline
-          preload="metadata"
-        />
+        {showVideo ? (
+          <video
+            className="h-full w-full object-cover"
+            src="/videos/paneer-hero.mp4"
+            poster="/images/Paneer-hero.png"
+            autoPlay
+            muted
+            loop
+            playsInline
+            preload="metadata"
+          />
+        ) : (
+          <Image
+            src="/images/Paneer-hero.png"
+            alt=""
+            fill
+            className="object-cover"
+            priority
+            sizes="100vw"
+          />
+        )}
       </div>
 
       {/* Lighter overlay so biryani pops */}

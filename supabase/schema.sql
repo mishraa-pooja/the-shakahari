@@ -2,6 +2,21 @@
 -- Creates the orders table and policies for Shaka-Hari
 -- Safe to re-run: policies are dropped before recreate if they already exist.
 
+-- ─────────────────────────────────────────────────────────────────────────────
+-- Custom types
+-- ─────────────────────────────────────────────────────────────────────────────
+DO $$ BEGIN
+  CREATE TYPE public.order_status AS ENUM (
+    'pending',
+    'confirmed',
+    'preparing',
+    'out_for_delivery',
+    'delivered',
+    'cancelled'
+  );
+EXCEPTION WHEN duplicate_object THEN NULL;
+END $$;
+
 -- 1. Orders table
 CREATE TABLE IF NOT EXISTS public.orders (
   id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
@@ -17,19 +32,29 @@ CREATE TABLE IF NOT EXISTS public.orders (
   total NUMERIC NOT NULL,
   payment_method TEXT NOT NULL DEFAULT 'COD',
   status TEXT NOT NULL DEFAULT 'pending',
+  is_first_order BOOLEAN NOT NULL DEFAULT false,
+  source TEXT NOT NULL DEFAULT 'website',
   latitude DOUBLE PRECISION,
   longitude DOUBLE PRECISION,
-  created_at TIMESTAMPTZ DEFAULT now()
+  created_at TIMESTAMPTZ DEFAULT now(),
+  updated_at TIMESTAMPTZ DEFAULT now()
 );
 
--- 2. Index for listing orders by date (for future admin)
+-- Migration helpers for existing tables
+ALTER TABLE public.orders ADD COLUMN IF NOT EXISTS is_first_order BOOLEAN NOT NULL DEFAULT false;
+ALTER TABLE public.orders ADD COLUMN IF NOT EXISTS source TEXT NOT NULL DEFAULT 'website';
+ALTER TABLE public.orders ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ DEFAULT now();
+
+-- 2. Indexes
 CREATE INDEX IF NOT EXISTS idx_orders_created_at ON public.orders (created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_orders_order_id ON public.orders (order_id);
+CREATE INDEX IF NOT EXISTS idx_orders_phone ON public.orders (phone);
+CREATE INDEX IF NOT EXISTS idx_orders_status ON public.orders (status);
 
 -- 3. Enable Row Level Security (RLS)
 ALTER TABLE public.orders ENABLE ROW LEVEL SECURITY;
 
--- 4. Policy: allow anonymous inserts (your Next.js API uses anon key to create orders)
+-- 4. Policy: allow anonymous inserts (Next.js API uses anon key to create orders)
 DROP POLICY IF EXISTS "Allow anonymous insert orders" ON public.orders;
 CREATE POLICY "Allow anonymous insert orders"
   ON public.orders
@@ -37,22 +62,33 @@ CREATE POLICY "Allow anonymous insert orders"
   TO anon
   WITH CHECK (true);
 
--- 5. Policy: allow anonymous to read their own orders by order_id (optional, for order status page later)
--- Uncomment if you add a "Track order" feature:
--- CREATE POLICY "Allow read by order_id"
---   ON public.orders
---   FOR SELECT
---   TO anon
---   USING (true);
+-- 5. Allow service_role full access (used by admin API routes)
+DROP POLICY IF EXISTS "Service role full access orders" ON public.orders;
+CREATE POLICY "Service role full access orders"
+  ON public.orders
+  FOR ALL
+  TO service_role
+  USING (true)
+  WITH CHECK (true);
 
--- 6. For admin dashboard later: use a separate role or service key to SELECT/UPDATE all orders.
--- For now, you can use the service_role key in a backend-only route to list/update orders.
+-- 6. Allow anon SELECT for order tracking / admin (protected by API key in headers)
+DROP POLICY IF EXISTS "Allow anon select orders" ON public.orders;
+CREATE POLICY "Allow anon select orders"
+  ON public.orders
+  FOR SELECT
+  TO anon
+  USING (true);
+
+-- 7. Allow anon UPDATE for status changes via admin API
+DROP POLICY IF EXISTS "Allow anon update orders" ON public.orders;
+CREATE POLICY "Allow anon update orders"
+  ON public.orders
+  FOR UPDATE
+  TO anon
+  USING (true)
+  WITH CHECK (true);
 
 COMMENT ON TABLE public.orders IS 'Customer orders from Shaka-Hari checkout';
-
--- If you already created the table and need to add location columns:
--- ALTER TABLE public.orders ADD COLUMN IF NOT EXISTS latitude DOUBLE PRECISION;
--- ALTER TABLE public.orders ADD COLUMN IF NOT EXISTS longitude DOUBLE PRECISION;
 
 -- ─────────────────────────────────────────────────────────────────────────────
 -- WhatsApp inbound messages (Cloud API webhook)
@@ -71,7 +107,6 @@ CREATE INDEX IF NOT EXISTS idx_whatsapp_messages_created_at
 
 ALTER TABLE public.whatsapp_messages ENABLE ROW LEVEL SECURITY;
 
--- Server can insert via anon (orders pattern) OR use SUPABASE_SERVICE_ROLE_KEY (recommended).
 DROP POLICY IF EXISTS "Allow insert whatsapp_messages anon" ON public.whatsapp_messages;
 CREATE POLICY "Allow insert whatsapp_messages anon"
   ON public.whatsapp_messages
@@ -80,3 +115,116 @@ CREATE POLICY "Allow insert whatsapp_messages anon"
   WITH CHECK (true);
 
 COMMENT ON TABLE public.whatsapp_messages IS 'Inbound WhatsApp Cloud API text messages';
+
+-- ─────────────────────────────────────────────────────────────────────────────
+-- WhatsApp / phone verification (no auth.users — separate from public.profiles)
+-- Rows are upserted from /api/auth/whatsapp-otp/verify using SUPABASE_SERVICE_ROLE_KEY.
+-- Use: CRM, “returning customer”, ops. First vs repeat verification = first_verified_at vs count.
+-- ─────────────────────────────────────────────────────────────────────────────
+CREATE TABLE IF NOT EXISTS public.phone_verified_profiles (
+  phone TEXT NOT NULL PRIMARY KEY CHECK (phone ~ '^[6-9][0-9]{9}$'),
+  whatsapp_verified_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  first_verified_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  last_verified_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  verification_count INTEGER NOT NULL DEFAULT 1 CHECK (verification_count >= 1),
+  full_name TEXT,
+  saved_addresses JSONB NOT NULL DEFAULT '[]'::jsonb,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+-- Migration for existing tables
+ALTER TABLE public.phone_verified_profiles
+  ADD COLUMN IF NOT EXISTS saved_addresses JSONB NOT NULL DEFAULT '[]'::jsonb;
+
+CREATE INDEX IF NOT EXISTS idx_phone_verified_profiles_last_verified
+  ON public.phone_verified_profiles (last_verified_at DESC);
+
+ALTER TABLE public.phone_verified_profiles ENABLE ROW LEVEL SECURITY;
+
+-- No anon/authenticated policies: server writes only via service_role (bypasses RLS).
+
+COMMENT ON TABLE public.phone_verified_profiles IS
+  'Phone numbers that completed WhatsApp OTP; not linked to auth.users';
+
+-- ─────────────────────────────────────────────────────────────────────────────
+-- Per-phone order stats for analytics (updated by POST /api/orders with service_role)
+-- dish_totals: { "menu-item-id": { "name": "Display name", "units": 12 } }
+-- top_dishes: sorted snapshot [{ id, name, units }, ...] max 15
+-- ─────────────────────────────────────────────────────────────────────────────
+CREATE TABLE IF NOT EXISTS public.customer_order_analytics (
+  phone TEXT NOT NULL PRIMARY KEY CHECK (phone ~ '^[6-9][0-9]{9}$'),
+  total_orders INTEGER NOT NULL DEFAULT 0 CHECK (total_orders >= 0),
+  dish_totals JSONB NOT NULL DEFAULT '{}'::jsonb,
+  top_dishes JSONB NOT NULL DEFAULT '[]'::jsonb,
+  last_customer_name TEXT,
+  first_order_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  last_order_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS idx_customer_order_analytics_last_order
+  ON public.customer_order_analytics (last_order_at DESC);
+
+CREATE INDEX IF NOT EXISTS idx_customer_order_analytics_total_orders
+  ON public.customer_order_analytics (total_orders DESC);
+
+ALTER TABLE public.customer_order_analytics ENABLE ROW LEVEL SECURITY;
+
+COMMENT ON TABLE public.customer_order_analytics IS
+  'Aggregated order counts and dish frequency per phone; server writes via service_role';
+
+-- ─────────────────────────────────────────────────────────────────────────────
+-- User profiles (Supabase Auth)
+-- ─────────────────────────────────────────────────────────────────────────────
+CREATE TABLE IF NOT EXISTS public.profiles (
+  id UUID PRIMARY KEY REFERENCES auth.users (id) ON DELETE CASCADE,
+  full_name TEXT,
+  phone TEXT,
+  address TEXT,
+  landmark TEXT,
+  pincode TEXT,
+  updated_at TIMESTAMPTZ DEFAULT now()
+);
+
+ALTER TABLE public.profiles ENABLE ROW LEVEL SECURITY;
+
+DROP POLICY IF EXISTS "Profiles select own" ON public.profiles;
+CREATE POLICY "Profiles select own"
+  ON public.profiles FOR SELECT TO authenticated
+  USING (auth.uid() = id);
+
+DROP POLICY IF EXISTS "Profiles insert own" ON public.profiles;
+CREATE POLICY "Profiles insert own"
+  ON public.profiles FOR INSERT TO authenticated
+  WITH CHECK (auth.uid() = id);
+
+DROP POLICY IF EXISTS "Profiles update own" ON public.profiles;
+CREATE POLICY "Profiles update own"
+  ON public.profiles FOR UPDATE TO authenticated
+  USING (auth.uid() = id);
+
+COMMENT ON TABLE public.profiles IS 'Delivery details linked to auth.users';
+
+CREATE OR REPLACE FUNCTION public.handle_new_user()
+RETURNS TRIGGER
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public
+AS $$
+BEGIN
+  INSERT INTO public.profiles (id, full_name)
+  VALUES (
+    NEW.id,
+    NULLIF(TRIM(NEW.raw_user_meta_data ->> 'full_name'), '')
+  )
+  ON CONFLICT (id) DO NOTHING;
+  RETURN NEW;
+END;
+$$;
+
+DROP TRIGGER IF EXISTS on_auth_user_created ON auth.users;
+CREATE TRIGGER on_auth_user_created
+  AFTER INSERT ON auth.users
+  FOR EACH ROW
+  EXECUTE PROCEDURE public.handle_new_user();

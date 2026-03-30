@@ -1,12 +1,11 @@
 /**
- * Checkout dialog — structured website order flow.
- * "Place Order" saves to Supabase and shows confirmation.
- * No WhatsApp involvement. No redirects. Standalone order path.
+ * Checkout: prefill from saved profile (multi-address), detect first order,
+ * show WhatsApp OTP panel with first-order gift messaging.
  */
 
 "use client";
 
-import { useState, useCallback } from "react";
+import { useState, useCallback, useEffect } from "react";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { toast } from "sonner";
@@ -27,6 +26,15 @@ import { LocationPicker, type LatLng } from "@/components/LocationPicker";
 import { checkoutFormSchema, type CheckoutFormValues } from "@/lib/validations";
 import { useCartStore } from "@/store/cartStore";
 import type { OrderItemPayload } from "@/types";
+import { useAuth } from "@/components/AuthProvider";
+import { getSupabaseBrowser } from "@/lib/supabase-browser";
+import {
+  buildOrderWhatsAppMessage,
+  getWhatsAppDeepLink,
+  type OrderWhatsAppParams,
+} from "@/lib/whatsappLink";
+import { useDeliveryProfileStore } from "@/store/deliveryProfileStore";
+import { WhatsAppOtpPanel } from "@/components/WhatsAppOtpPanel";
 
 const SLOT_OPTIONS = [
   { value: "12 PM", label: "12 PM" },
@@ -43,8 +51,18 @@ export interface CheckoutModalProps {
 export function CheckoutModal({ open, onOpenChange }: CheckoutModalProps) {
   const [loading, setLoading] = useState(false);
   const [successOrderId, setSuccessOrderId] = useState<string | null>(null);
+  const [isFirstOrder, setIsFirstOrder] = useState(false);
+  const [orderSummary, setOrderSummary] = useState<OrderWhatsAppParams | null>(
+    null
+  );
   const [location, setLocation] = useState<LatLng | null>(null);
   const { items, getTotal, clearCart } = useCartStore();
+  const { user, profile, refreshProfile } = useAuth();
+  const savedLocal = useDeliveryProfileStore((s) => s.profile);
+  const setSavedLocal = useDeliveryProfileStore((s) => s.setProfile);
+  const markWhatsappVerified = useDeliveryProfileStore(
+    (s) => s.markWhatsappVerified
+  );
 
   const form = useForm<CheckoutFormValues>({
     resolver: zodResolver(checkoutFormSchema),
@@ -61,6 +79,37 @@ export function CheckoutModal({ open, onOpenChange }: CheckoutModalProps) {
 
   const total = getTotal();
   const cartEmpty = items.length === 0;
+
+  useEffect(() => {
+    if (!open) return;
+    if (user && profile) {
+      form.reset({
+        name: profile.full_name ?? "",
+        phone: profile.phone ?? "",
+        address: profile.address ?? "",
+        landmark: profile.landmark ?? "",
+        pincode: profile.pincode ?? "",
+        slot: undefined,
+        notes: "",
+      });
+      return;
+    }
+    if (savedLocal && savedLocal.addresses.length > 0) {
+      const active =
+        savedLocal.addresses.find(
+          (a) => a.id === savedLocal.activeAddressId
+        ) ?? savedLocal.addresses[0];
+      form.reset({
+        name: active.full_name || savedLocal.full_name,
+        phone: active.phone || savedLocal.phone,
+        address: active.address,
+        landmark: active.landmark,
+        pincode: active.pincode,
+        slot: undefined,
+        notes: "",
+      });
+    }
+  }, [open, user, profile, savedLocal, form]);
 
   const handleLocationChange = useCallback((loc: LatLng) => {
     setLocation(loc);
@@ -118,8 +167,56 @@ export function CheckoutModal({ open, onOpenChange }: CheckoutModalProps) {
         return;
       }
 
+      const orderId = json.orderId as string;
+      const firstOrder = Boolean(json.isFirstOrder);
+
+      if (user) {
+        try {
+          const sb = getSupabaseBrowser();
+          const { error: upErr } = await sb.from("profiles").upsert(
+            {
+              id: user.id,
+              full_name: data.name,
+              phone: data.phone,
+              address: data.address,
+              landmark: data.landmark || null,
+              pincode: data.pincode,
+              updated_at: new Date().toISOString(),
+            },
+            { onConflict: "id" }
+          );
+          if (upErr) console.error("profile save:", upErr);
+          else await refreshProfile();
+        } catch (e) {
+          console.error("profile save:", e);
+        }
+      }
+
+      setSavedLocal({
+        full_name: data.name,
+        phone: data.phone,
+        address: data.address,
+        landmark: data.landmark,
+        pincode: data.pincode,
+      });
+
       clearCart();
-      setSuccessOrderId(json.orderId);
+      setSuccessOrderId(orderId);
+      setIsFirstOrder(firstOrder);
+      setOrderSummary({
+        orderId,
+        name: data.name,
+        phone: data.phone,
+        address: data.address,
+        landmark: data.landmark,
+        pincode: data.pincode,
+        slot: data.slot,
+        notes: data.notes,
+        items: payload.items,
+        total,
+        latitude: location?.lat,
+        longitude: location?.lng,
+      });
       toast.success("Order placed successfully!");
     } catch {
       toast.error("Failed to place order. Please try again.");
@@ -131,11 +228,16 @@ export function CheckoutModal({ open, onOpenChange }: CheckoutModalProps) {
   const handleClose = (isOpen: boolean) => {
     if (!isOpen) {
       setSuccessOrderId(null);
+      setOrderSummary(null);
+      setIsFirstOrder(false);
       setLocation(null);
       form.reset();
     }
     onOpenChange(isOpen);
   };
+
+  const whatsappUrl =
+    orderSummary && getWhatsAppDeepLink(buildOrderWhatsAppMessage(orderSummary));
 
   return (
     <Dialog open={open} onOpenChange={handleClose}>
@@ -163,8 +265,32 @@ export function CheckoutModal({ open, onOpenChange }: CheckoutModalProps) {
               <p className="text-center text-xs text-gold/50">
                 We&apos;ll contact you shortly to confirm delivery.
               </p>
+
+              {!user &&
+              !savedLocal?.whatsapp_verified_at &&
+              successOrderId &&
+              orderSummary ? (
+                <WhatsAppOtpPanel
+                  orderId={successOrderId}
+                  orderPhone10={orderSummary.phone}
+                  customerName={orderSummary.name}
+                  isFirstOrder={isFirstOrder}
+                  onVerified={() => markWhatsappVerified()}
+                />
+              ) : null}
+
+              {whatsappUrl ? (
+                <Button
+                  type="button"
+                  className="w-full"
+                  onClick={() => window.open(whatsappUrl, "_blank")}
+                >
+                  Confirm order on WhatsApp
+                </Button>
+              ) : null}
               <Button
                 type="button"
+                variant="outline"
                 onClick={() => handleClose(false)}
                 className="w-full"
               >
@@ -177,7 +303,9 @@ export function CheckoutModal({ open, onOpenChange }: CheckoutModalProps) {
             <DialogHeader>
               <DialogTitle>Checkout</DialogTitle>
               <DialogDescription>
-                Fill in your delivery details and place your order.
+                {user
+                  ? "Your saved details are filled in. Update anything before ordering."
+                  : "Fill in your delivery details. We remember them for next time."}
               </DialogDescription>
             </DialogHeader>
             <form onSubmit={handleSubmit} className="space-y-4">
@@ -223,6 +351,7 @@ export function CheckoutModal({ open, onOpenChange }: CheckoutModalProps) {
                 value={location}
                 onChange={handleLocationChange}
                 onAddressDetected={handleAddressDetected}
+                addressText={form.watch("address")}
               />
 
               <div className="grid gap-2">

@@ -6,7 +6,7 @@
 
 "use client";
 
-import { useState, useCallback, useRef } from "react";
+import { useState, useCallback, useRef, useEffect } from "react";
 import {
   GoogleMap,
   MarkerF,
@@ -41,40 +41,79 @@ interface LocationPickerProps {
   onAddressDetected?: (address: string) => void;
 }
 
+interface LocationPickerFullProps extends LocationPickerProps {
+  addressText?: string;
+}
+
 export function LocationPicker({
   value,
   onChange,
   onAddressDetected,
-}: LocationPickerProps) {
+  addressText,
+}: LocationPickerFullProps) {
   const [locating, setLocating] = useState(false);
+  const [mapCenter, setMapCenter] = useState<LatLng>(DEFAULT_CENTER);
   const mapRef = useRef<google.maps.Map | null>(null);
   const geocoderRef = useRef<google.maps.Geocoder | null>(null);
+  const lastGeocodedRef = useRef<string>("");
 
   const apiKey = process.env.NEXT_PUBLIC_GOOGLE_MAPS_KEY ?? "";
   const { isLoaded } = useJsApiLoader({ googleMapsApiKey: apiKey });
 
+  const getGeocoder = useCallback(() => {
+    if (!geocoderRef.current && typeof google !== "undefined") {
+      geocoderRef.current = new google.maps.Geocoder();
+    }
+    return geocoderRef.current;
+  }, []);
+
   const reverseGeocode = useCallback(
     (lat: number, lng: number) => {
       if (!onAddressDetected) return;
-      if (!geocoderRef.current) {
-        geocoderRef.current = new google.maps.Geocoder();
-      }
-      geocoderRef.current.geocode(
-        { location: { lat, lng } },
-        (results, status) => {
-          if (status === "OK" && results?.[0]) {
-            onAddressDetected(results[0].formatted_address);
-          }
+      const gc = getGeocoder();
+      if (!gc) return;
+      gc.geocode({ location: { lat, lng } }, (results, status) => {
+        if (status === "OK" && results?.[0]) {
+          onAddressDetected(results[0].formatted_address);
         }
-      );
+      });
     },
-    [onAddressDetected]
+    [onAddressDetected, getGeocoder]
   );
+
+  // Forward-geocode the typed address to center the map when no pin is set
+  useEffect(() => {
+    if (value) return; // already have a pin
+    if (!isLoaded) return;
+    const text = (addressText ?? "").trim();
+    if (text.length < 10) return;
+    if (text === lastGeocodedRef.current) return;
+    lastGeocodedRef.current = text;
+
+    const gc = getGeocoder();
+    if (!gc) return;
+
+    const timer = setTimeout(() => {
+      gc.geocode({ address: text, region: "IN" }, (results, status) => {
+        if (status === "OK" && results?.[0]?.geometry?.location) {
+          const loc = results[0].geometry.location;
+          const newCenter = { lat: loc.lat(), lng: loc.lng() };
+          setMapCenter(newCenter);
+          mapRef.current?.panTo(newCenter);
+          mapRef.current?.setZoom(15);
+        }
+      });
+    }, 600);
+
+    return () => clearTimeout(timer);
+  }, [addressText, value, isLoaded, getGeocoder]);
 
   const setPin = useCallback(
     (lat: number, lng: number) => {
       onChange({ lat, lng });
-      mapRef.current?.panTo({ lat, lng });
+      const loc = { lat, lng };
+      setMapCenter(loc);
+      mapRef.current?.panTo(loc);
       mapRef.current?.setZoom(17);
       reverseGeocode(lat, lng);
     },
@@ -97,24 +136,27 @@ export function LocationPicker({
     const onError = (err: GeolocationPositionError) => {
       if (err.code === 1) {
         setLocating(false);
-        toast.error("Location access denied. Allow location in browser settings, or tap the map.");
+        toast.error(
+          "Location access denied. Please allow location in your browser settings, or tap the map to pin manually."
+        );
         return;
       }
-      // enableHighAccuracy failed — retry with low accuracy (WiFi/network)
       navigator.geolocation.getCurrentPosition(
         onSuccess,
         () => {
           setLocating(false);
-          toast.error("Could not detect location. Tap the map to pin your spot.");
+          toast.info(
+            "Could not detect precise location. Tap the map to pin your delivery spot."
+          );
         },
-        { enableHighAccuracy: false, timeout: 15000, maximumAge: 300000 }
+        { enableHighAccuracy: false, timeout: 20000, maximumAge: 600000 }
       );
     };
 
     navigator.geolocation.getCurrentPosition(onSuccess, onError, {
       enableHighAccuracy: true,
-      timeout: 8000,
-      maximumAge: 60000,
+      timeout: 12000,
+      maximumAge: 120000,
     });
   }, [setPin]);
 
@@ -158,7 +200,7 @@ export function LocationPicker({
 
       <GoogleMap
         mapContainerStyle={MAP_STYLE}
-        center={value ?? DEFAULT_CENTER}
+        center={value ?? mapCenter}
         zoom={value ? 17 : 12}
         options={MAP_OPTIONS}
         onClick={handleMapClick}
