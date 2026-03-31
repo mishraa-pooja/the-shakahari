@@ -97,7 +97,7 @@ export async function sendGreeting(to: string): Promise<WaResult> {
     interactive: {
       type: "button",
       body: {
-        text: "Hi! Welcome to Shaka-Hari 🌿\n\nHow can we help you today?",
+        text: "Hi! Welcome to Shaka-Hari 🌿\nPure veg. Dum-cooked. Andhra soul.\n\nHow can we help you today?",
       },
       action: {
         buttons: [

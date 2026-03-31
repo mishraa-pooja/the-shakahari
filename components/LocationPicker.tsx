@@ -120,45 +120,77 @@ export function LocationPicker({
     [onChange, reverseGeocode]
   );
 
-  const handleLocateMe = useCallback(() => {
-    if (!navigator.geolocation) {
-      toast.error("Geolocation not supported by your browser.");
-      return;
-    }
-    setLocating(true);
+  const permStatusRef = useRef<PermissionState | null>(null);
 
-    const onSuccess = (pos: GeolocationPosition) => {
-      setPin(pos.coords.latitude, pos.coords.longitude);
-      setLocating(false);
-      toast.success("Location detected!");
-    };
-
-    const onError = (err: GeolocationPositionError) => {
-      if (err.code === 1) {
-        setLocating(false);
-        toast.error(
-          "Location access denied. Please allow location in your browser settings, or tap the map to pin manually."
-        );
+  const doGeolocate = useCallback(
+    (silent = false) => {
+      if (!navigator.geolocation) {
+        if (!silent) toast.error("Geolocation not supported by your browser.");
         return;
       }
-      navigator.geolocation.getCurrentPosition(
-        onSuccess,
-        () => {
-          setLocating(false);
-          toast.info(
-            "Could not detect precise location. Tap the map to pin your delivery spot."
-          );
-        },
-        { enableHighAccuracy: false, timeout: 20000, maximumAge: 600000 }
-      );
-    };
+      setLocating(true);
 
-    navigator.geolocation.getCurrentPosition(onSuccess, onError, {
-      enableHighAccuracy: true,
-      timeout: 12000,
-      maximumAge: 120000,
-    });
-  }, [setPin]);
+      const onSuccess = (pos: GeolocationPosition) => {
+        setPin(pos.coords.latitude, pos.coords.longitude);
+        setLocating(false);
+        if (!silent) toast.success("Location detected!");
+      };
+
+      const onError = (err: GeolocationPositionError) => {
+        if (err.code === 1) {
+          setLocating(false);
+          permStatusRef.current = "denied";
+          if (!silent)
+            toast.error(
+              "Location access denied. Allow location in browser settings, or tap the map."
+            );
+          return;
+        }
+        navigator.geolocation.getCurrentPosition(
+          onSuccess,
+          () => {
+            setLocating(false);
+            if (!silent)
+              toast.info("Could not detect location. Tap the map to pin your spot.");
+          },
+          { enableHighAccuracy: false, timeout: 20000, maximumAge: 600000 }
+        );
+      };
+
+      navigator.geolocation.getCurrentPosition(onSuccess, onError, {
+        enableHighAccuracy: true,
+        timeout: 12000,
+        maximumAge: 120000,
+      });
+    },
+    [setPin]
+  );
+
+  // Auto-detect location on mount if permission is already granted
+  useEffect(() => {
+    if (value) return;
+    if (!navigator.permissions) return;
+    navigator.permissions
+      .query({ name: "geolocation" })
+      .then((result) => {
+        permStatusRef.current = result.state;
+        if (result.state === "granted") {
+          doGeolocate(true);
+        }
+      })
+      .catch(() => {});
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  const handleLocateMe = useCallback(() => {
+    if (permStatusRef.current === "denied") {
+      toast.error(
+        "Location access is blocked. Enable it in your browser's site settings, or tap the map."
+      );
+      return;
+    }
+    doGeolocate(false);
+  }, [doGeolocate]);
 
   const onMapLoad = useCallback((map: google.maps.Map) => {
     mapRef.current = map;

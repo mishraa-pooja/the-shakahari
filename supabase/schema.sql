@@ -148,6 +148,26 @@ COMMENT ON TABLE public.phone_verified_profiles IS
   'Phone numbers that completed WhatsApp OTP; not linked to auth.users';
 
 -- ─────────────────────────────────────────────────────────────────────────────
+-- WhatsApp ordering sessions (conversation state for chatbot flow)
+-- ─────────────────────────────────────────────────────────────────────────────
+CREATE TABLE IF NOT EXISTS public.whatsapp_order_sessions (
+  phone TEXT NOT NULL PRIMARY KEY,
+  state TEXT NOT NULL DEFAULT 'idle',
+  cart JSONB NOT NULL DEFAULT '[]'::jsonb,
+  pending_item_id TEXT,
+  address TEXT,
+  customer_name TEXT,
+  location_lat DOUBLE PRECISION,
+  location_lng DOUBLE PRECISION,
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+ALTER TABLE public.whatsapp_order_sessions ENABLE ROW LEVEL SECURITY;
+
+COMMENT ON TABLE public.whatsapp_order_sessions IS
+  'Conversation state for WhatsApp ordering flow; server writes via service_role';
+
+-- ─────────────────────────────────────────────────────────────────────────────
 -- Per-phone order stats for analytics (updated by POST /api/orders with service_role)
 -- dish_totals: { "menu-item-id": { "name": "Display name", "units": 12 } }
 -- top_dishes: sorted snapshot [{ id, name, units }, ...] max 15

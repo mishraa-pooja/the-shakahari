@@ -16,6 +16,10 @@ import {
   sendMenu,
   isLikelyOwnNumber,
 } from "@/lib/whatsapp";
+import {
+  handleOrderFlow,
+  handleLocationMessage,
+} from "@/lib/whatsapp-order-flow";
 
 /** Meta GET verification */
 export async function GET(request: Request) {
@@ -65,6 +69,8 @@ type InboundMessage = {
   timestamp: string;
   buttonReplyId: string;
   listReplyId: string;
+  locationLat: number | null;
+  locationLng: number | null;
 };
 
 /**
@@ -93,6 +99,8 @@ function extractInboundMessages(body: unknown): InboundMessage[] {
           let text = "";
           let buttonReplyId = "";
           let listReplyId = "";
+          let locationLat: number | null = null;
+          let locationLng: number | null = null;
 
           if (type === "text") {
             const textObj = msg.text;
@@ -112,6 +120,12 @@ function extractInboundMessages(body: unknown): InboundMessage[] {
                 listReplyId = getString(lstReply, "id") ?? "";
               }
             }
+          } else if (type === "location") {
+            const loc = msg.location;
+            if (isRecord(loc)) {
+              locationLat = typeof loc.latitude === "number" ? loc.latitude : null;
+              locationLng = typeof loc.longitude === "number" ? loc.longitude : null;
+            }
           } else {
             continue;
           }
@@ -123,6 +137,8 @@ function extractInboundMessages(body: unknown): InboundMessage[] {
             timestamp: ts,
             buttonReplyId,
             listReplyId,
+            locationLat,
+            locationLng,
           });
         }
       }
@@ -134,17 +150,40 @@ function extractInboundMessages(body: unknown): InboundMessage[] {
   return out;
 }
 
-const ORDER_LINK = "🛒 Order here: https://theshakahari.com";
 const LOCATION_MSG = `📍 The Shaka-Hari\n\nAddress: (coming soon)\nTimings: 12 PM – 3 PM (delivery only)\n\nOrder online: https://theshakahari.com`;
 
-async function routeReply(m: InboundMessage): Promise<void> {
+async function routeReply(
+  m: InboundMessage,
+  db: ReturnType<typeof getSupabase>
+): Promise<void> {
   const textLower = m.text.trim().toLowerCase();
   const bid = m.buttonReplyId;
   const lid = m.listReplyId;
 
+  // Handle live location messages for ordering flow
+  if (m.locationLat !== null && m.locationLng !== null) {
+    const handled = await handleLocationMessage(
+      db,
+      m.from,
+      m.locationLat,
+      m.locationLng
+    );
+    if (handled) return;
+  }
+
+  // Let the order flow state machine handle if there's an active session
+  const handled = await handleOrderFlow(
+    db,
+    m.from,
+    m.text,
+    bid,
+    lid
+  );
+  if (handled) return;
+
+  // ── Default routing (idle state, no active order) ──
   if (
     bid === "MENU" ||
-    lid.startsWith("ITEM_") ||
     textLower === "1" ||
     textLower === "menu"
   ) {
@@ -154,16 +193,17 @@ async function routeReply(m: InboundMessage): Promise<void> {
   }
 
   if (bid === "ORDER" || textLower === "2" || textLower === "order") {
-    const r = await sendWhatsAppMessage(m.from, ORDER_LINK);
-    if (!r.ok)
-      console.error("whatsapp webhook: order link failed", r.error);
+    const r = await sendWhatsAppMessage(
+      m.from,
+      "🛒 Order online: https://theshakahari.com\n\nOr reply *menu* to order right here on WhatsApp!"
+    );
+    if (!r.ok) console.error("whatsapp webhook: order link failed", r.error);
     return;
   }
 
   if (bid === "LOCATION" || textLower === "3" || textLower === "location") {
     const r = await sendWhatsAppMessage(m.from, LOCATION_MSG);
-    if (!r.ok)
-      console.error("whatsapp webhook: location msg failed", r.error);
+    if (!r.ok) console.error("whatsapp webhook: location msg failed", r.error);
     return;
   }
 
@@ -224,7 +264,7 @@ export async function POST(request: Request) {
       console.error("whatsapp webhook: supabase insert", insertError);
     }
 
-    await routeReply(m);
+    await routeReply(m, supabase);
   }
 
   return NextResponse.json(
