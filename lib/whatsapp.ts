@@ -86,7 +86,7 @@ export async function sendWhatsAppMessage(
   });
 }
 
-/** Welcome greeting with 3 interactive buttons. */
+/** Welcome greeting with 3 interactive buttons — exciting and conversion-focused. */
 export async function sendGreeting(to: string): Promise<WaResult> {
   const toDigits = normalizePhone(to);
   if (!toDigits) return { ok: false, error: "Invalid recipient" };
@@ -97,15 +97,21 @@ export async function sendGreeting(to: string): Promise<WaResult> {
     interactive: {
       type: "button",
       body: {
-        text: "Hi! Welcome to Shaka-Hari 🌿\nPure veg. Dum-cooked. Andhra soul.\n\nHow can we help you today?",
+        text:
+          "Hey there! Welcome to *The Shaka-Hari* \uD83C\uDF3F\n\n" +
+          "\uD83D\uDD25 Kharghar's first pure veg dum biryani!\n" +
+          "Slow-cooked. Andhra-style. Packed with flavour.\n\n" +
+          "Freshly prepared. Limited boxes daily.\n" +
+          "Delivered to your door in 30 mins \uD83D\uDE80\n\n" +
+          "Tap below to get started!",
       },
       action: {
         buttons: [
-          { type: "reply", reply: { id: "MENU", title: "🍽️ View Menu" } },
-          { type: "reply", reply: { id: "ORDER", title: "🛒 Order Online" } },
+          { type: "reply", reply: { id: "MENU", title: "\uD83C\uDF5B See Menu & Order" } },
+          { type: "reply", reply: { id: "ORDER", title: "\uD83C\uDF10 Order Online" } },
           {
             type: "reply",
-            reply: { id: "LOCATION", title: "📍 Location" },
+            reply: { id: "LOCATION", title: "\uD83D\uDCCD Location" },
           },
         ],
       },
@@ -113,7 +119,20 @@ export async function sendGreeting(to: string): Promise<WaResult> {
   });
 }
 
-/** Interactive list with menu sections — items sourced from menuData, per-item stock shown. */
+/**
+ * Short names for WhatsApp list rows (max 24 chars per title).
+ * Full names are used in the body text.
+ */
+const WA_SHORT_NAMES: Record<string, string> = {
+  "paneer-biryani": "Paneer Dum Biryani",
+  "veg-dum-biryani": "Signature Veg Biryani",
+  "soya-chaap-biryani": "Soya Chaap Biryani",
+  "mushroom-biryani": "Mushroom Dum Biryani",
+  "raita": "Cooling Mint Raita",
+  "gulab-jamun": "Gulab Jamun (2 pcs)",
+};
+
+/** Interactive list with menu sections — per-item stock shown. */
 export async function sendMenu(
   to: string,
   stockMap?: Record<string, number>
@@ -130,17 +149,21 @@ export async function sendMenu(
     (i) => !i.name.toLowerCase().includes("biryani")
   );
 
-  const stockLabel = (id: string) => {
+  const stockTag = (id: string) => {
     if (!stockMap || stockMap[id] === undefined) return "";
-    if (stockMap[id] <= 0) return " ❌ SOLD OUT";
-    return ` (${stockMap[id]} left)`;
+    if (stockMap[id] <= 0) return " [SOLD OUT]";
+    return ` [${stockMap[id]} left]`;
   };
 
-  const toRow = (item: (typeof menuItems)[number]) => ({
-    id: `ITEM_${item.id.toUpperCase().replace(/-/g, "_")}`,
-    title: item.name,
-    description: `₹${item.price}${stockLabel(item.id)} — ${item.description.slice(0, 50)}`,
-  });
+  const toRow = (item: (typeof menuItems)[number]) => {
+    const shortName = WA_SHORT_NAMES[item.id] ?? item.name.slice(0, 24);
+    const desc = `\u20B9${item.price}${stockTag(item.id)}`;
+    return {
+      id: `ITEM_${item.id.toUpperCase().replace(/-/g, "_")}`,
+      title: shortName.slice(0, 24),
+      description: desc.slice(0, 72),
+    };
+  };
 
   const sections: { title: string; rows: ReturnType<typeof toRow>[] }[] = [];
   if (biryanis.length > 0) {
@@ -150,8 +173,15 @@ export async function sendMenu(
     sections.push({ title: "Sides & Desserts", rows: others.map(toRow) });
   }
 
-  const numbered = menuItems
-    .map((m, i) => `${i + 1}. ${m.name} — ₹${m.price}${stockLabel(m.id)}`)
+  const numbered = biryanis
+    .map(
+      (m, i) =>
+        `${i + 1}. ${WA_SHORT_NAMES[m.id] ?? m.name} \u2014 \u20B9${m.price}${stockTag(m.id)}`
+    )
+    .join("\n");
+
+  const sidesLine = others
+    .map((m) => `\u2022 ${WA_SHORT_NAMES[m.id] ?? m.name} \u2014 \u20B9${m.price}`)
     .join("\n");
 
   const totalStock = stockMap
@@ -160,26 +190,40 @@ export async function sendMenu(
 
   const stockLine =
     totalStock != null && totalStock > 0
-      ? `\n\n\u{1F525} *Only ${totalStock} ${totalStock === 1 ? "box" : "boxes"} left today!*`
+      ? `\n\n\uD83D\uDD25 *Only ${totalStock} ${totalStock === 1 ? "box" : "boxes"} left today!*`
       : "";
 
-  return postMessage({
+  const body =
+    `\uD83C\uDF5B *Our Menu* \uD83C\uDF3F\n\n` +
+    `${numbered}\n\n` +
+    `${sidesLine}${stockLine}\n\n` +
+    `*To order:* Just type what you want!\n` +
+    `e.g. _2 paneer, 1 mushroom, 1 raita_\n\n` +
+    `Or tap below to pick from the list \u{1F447}`;
+
+  const result = await postMessage({
     to: toDigits,
     type: "interactive",
     interactive: {
       type: "list",
-      body: {
-        text:
-          `Here's our menu \u{1F33F}\n\n${numbered}${stockLine}\n\n` +
-          `*Quick order:* Type items with quantity!\n` +
-          `e.g. _2 paneer, 1 mushroom, 1 raita_`,
-      },
+      body: { text: body },
       action: {
-        button: "Tap to Select",
+        button: "Browse Menu",
         sections,
       },
     },
   });
+
+  if (!result.ok) {
+    console.error("sendMenu interactive list failed, falling back to text:", result.error);
+    return sendWhatsAppMessage(
+      to,
+      `\uD83C\uDF5B *Our Menu* \uD83C\uDF3F\n\n${numbered}\n\n${sidesLine}${stockLine}\n\n` +
+        `*To order:* Just type what you want!\ne.g. _2 paneer, 1 mushroom, 1 raita_`
+    );
+  }
+
+  return result;
 }
 
 /**

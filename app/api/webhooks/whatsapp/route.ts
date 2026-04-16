@@ -159,6 +159,18 @@ const SOLD_OUT_MSG =
   "Reply *notify* and we'll WhatsApp you as soon as fresh boxes are ready. 🌿\n\n" +
   "— The Shaka-Hari";
 
+/** Fire-and-forget: log bot reply to admin_chat_messages for the admin chat window. */
+function logBotReply(
+  db: ReturnType<typeof getSupabase>,
+  phone: string,
+  message: string
+) {
+  void db
+    .from("admin_chat_messages")
+    .insert({ phone, direction: "outbound", message, admin_name: "Bot" })
+    .then(() => null);
+}
+
 async function routeReply(
   m: InboundMessage,
   db: ReturnType<typeof getSupabase>
@@ -176,10 +188,9 @@ async function routeReply(
         { phone: phone10, created_at: new Date().toISOString() },
         { onConflict: "phone" }
       );
-    void sendWhatsAppMessage(
-      m.from,
-      "You're on the list! We'll WhatsApp you the moment fresh boxes are ready. 🌿"
-    );
+    const reply = "You're on the list! We'll WhatsApp you the moment fresh boxes are ready. \uD83C\uDF3F";
+    void sendWhatsAppMessage(m.from, reply);
+    logBotReply(db, m.from, reply);
     return;
   }
 
@@ -203,8 +214,10 @@ async function routeReply(
   if (bid === "MENU" || textLower === "1" || textLower === "menu") {
     if (totalStock <= 0) {
       void sendWhatsAppMessage(m.from, SOLD_OUT_MSG);
+      logBotReply(db, m.from, SOLD_OUT_MSG);
     } else {
       void sendMenu(m.from, stockMap);
+      logBotReply(db, m.from, "[Menu sent with item list]");
     }
     return;
   }
@@ -212,21 +225,24 @@ async function routeReply(
   if (bid === "ORDER" || textLower === "2" || textLower === "order") {
     if (totalStock <= 0) {
       void sendWhatsAppMessage(m.from, SOLD_OUT_MSG);
+      logBotReply(db, m.from, SOLD_OUT_MSG);
     } else {
-      void sendWhatsAppMessage(
-        m.from,
-        `\u{1F6D2} Order online: https://theshakahari.com\n\nOr reply *menu* to order right here on WhatsApp!\n\n\u{1F525} *${totalStock} boxes left today*`
-      );
+      const reply =
+        `\uD83D\uDED2 Order online: https://theshakahari.com\n\nOr reply *menu* to order right here on WhatsApp!\n\n\uD83D\uDD25 *${totalStock} boxes left today*`;
+      void sendWhatsAppMessage(m.from, reply);
+      logBotReply(db, m.from, reply);
     }
     return;
   }
 
   if (bid === "LOCATION" || textLower === "3" || textLower === "location") {
     void sendWhatsAppMessage(m.from, LOCATION_MSG);
+    logBotReply(db, m.from, LOCATION_MSG);
     return;
   }
 
   void sendGreeting(m.from);
+  logBotReply(db, m.from, "[Greeting sent with buttons]");
 }
 
 export async function POST(request: Request) {
