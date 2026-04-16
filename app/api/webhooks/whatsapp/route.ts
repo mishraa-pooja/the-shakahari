@@ -16,6 +16,7 @@ import {
   sendMenu,
   isLikelyOwnNumber,
 } from "@/lib/whatsapp";
+import { getAllStock } from "@/lib/stock";
 import {
   handleOrderFlow,
   handleLocationMessage,
@@ -152,6 +153,12 @@ function extractInboundMessages(body: unknown): InboundMessage[] {
 
 const LOCATION_MSG = `📍 The Shaka-Hari\n\nAddress: (coming soon)\nTimings: 12 PM – 3 PM (delivery only)\n\nOrder online: https://theshakahari.com`;
 
+const SOLD_OUT_MSG =
+  "Sorry, we're *sold out for today!* 🙏\n\n" +
+  "All biryani boxes have been claimed.\n\n" +
+  "Reply *notify* and we'll WhatsApp you as soon as fresh boxes are ready. 🌿\n\n" +
+  "— The Shaka-Hari";
+
 async function routeReply(
   m: InboundMessage,
   db: ReturnType<typeof getSupabase>
@@ -160,55 +167,66 @@ async function routeReply(
   const bid = m.buttonReplyId;
   const lid = m.listReplyId;
 
-  // Handle live location messages for ordering flow
+  // "notify" — join stock waitlist
+  if (textLower === "notify" || textLower === "notify me") {
+    const phone10 = m.from.replace(/^91/, "");
+    await db
+      .from("stock_waitlist")
+      .upsert(
+        { phone: phone10, created_at: new Date().toISOString() },
+        { onConflict: "phone" }
+      );
+    void sendWhatsAppMessage(
+      m.from,
+      "You're on the list! We'll WhatsApp you the moment fresh boxes are ready. 🌿"
+    );
+    return;
+  }
+
+  // Location messages → order flow
   if (m.locationLat !== null && m.locationLng !== null) {
     const handled = await handleLocationMessage(
-      db,
-      m.from,
-      m.locationLat,
-      m.locationLng
+      db, m.from, m.locationLat, m.locationLng
     );
     if (handled) return;
   }
 
-  // Let the order flow state machine handle if there's an active session
-  const handled = await handleOrderFlow(
-    db,
-    m.from,
-    m.text,
-    bid,
-    lid
-  );
+  // Order flow state machine (handles active sessions)
+  const handled = await handleOrderFlow(db, m.from, m.text, bid, lid);
   if (handled) return;
 
-  // ── Default routing (idle state, no active order) ──
-  if (
-    bid === "MENU" ||
-    textLower === "1" ||
-    textLower === "menu"
-  ) {
-    const r = await sendMenu(m.from);
-    if (!r.ok) console.error("whatsapp webhook: sendMenu failed", r.error);
+  // Check per-item stock for menu/order requests
+  const stockMap = await getAllStock(db);
+  const totalStock = Object.values(stockMap).reduce((a, b) => a + b, 0);
+
+  // Default routing (idle state, no active order)
+  if (bid === "MENU" || textLower === "1" || textLower === "menu") {
+    if (totalStock <= 0) {
+      void sendWhatsAppMessage(m.from, SOLD_OUT_MSG);
+    } else {
+      void sendMenu(m.from, stockMap);
+    }
     return;
   }
 
   if (bid === "ORDER" || textLower === "2" || textLower === "order") {
-    const r = await sendWhatsAppMessage(
-      m.from,
-      "🛒 Order online: https://theshakahari.com\n\nOr reply *menu* to order right here on WhatsApp!"
-    );
-    if (!r.ok) console.error("whatsapp webhook: order link failed", r.error);
+    if (totalStock <= 0) {
+      void sendWhatsAppMessage(m.from, SOLD_OUT_MSG);
+    } else {
+      void sendWhatsAppMessage(
+        m.from,
+        `\u{1F6D2} Order online: https://theshakahari.com\n\nOr reply *menu* to order right here on WhatsApp!\n\n\u{1F525} *${totalStock} boxes left today*`
+      );
+    }
     return;
   }
 
   if (bid === "LOCATION" || textLower === "3" || textLower === "location") {
-    const r = await sendWhatsAppMessage(m.from, LOCATION_MSG);
-    if (!r.ok) console.error("whatsapp webhook: location msg failed", r.error);
+    void sendWhatsAppMessage(m.from, LOCATION_MSG);
     return;
   }
 
-  const r = await sendGreeting(m.from);
-  if (!r.ok) console.error("whatsapp webhook: greeting failed", r.error);
+  void sendGreeting(m.from);
 }
 
 export async function POST(request: Request) {
@@ -233,39 +251,56 @@ export async function POST(request: Request) {
     return NextResponse.json({ ok: false }, { status: 200 });
   }
 
-  for (const m of messages) {
-    if (isLikelyOwnNumber(m.from)) {
-      console.log("whatsapp webhook: skip self-number", m.messageId);
-      continue;
-    }
+  const seen = new Set<string>();
 
-    const dbText = m.text || m.buttonReplyId || m.listReplyId || "(interactive)";
-    const { error: insertError } = await supabase
-      .from("whatsapp_messages")
-      .insert({
-        phone: m.from,
-        message: dbText,
-        message_id: m.messageId,
-        timestamp: m.timestamp,
-      });
+  await Promise.all(
+    messages.map(async (m) => {
+      if (isLikelyOwnNumber(m.from)) return;
+      if (seen.has(m.messageId)) return;
+      seen.add(m.messageId);
 
-    if (insertError) {
-      const code = String(insertError.code ?? "");
-      const isDup =
-        code === "23505" ||
-        insertError.message?.toLowerCase().includes("duplicate");
-      if (isDup) {
-        console.log(
-          "whatsapp webhook: duplicate message_id, skip reply",
-          m.messageId
-        );
-        continue;
+      // Log message to DB and route reply in parallel
+      const dbText =
+        m.text || m.buttonReplyId || m.listReplyId || "(interactive)";
+
+      const insertP = supabase
+        .from("whatsapp_messages")
+        .insert({
+          phone: m.from,
+          message: dbText,
+          message_id: m.messageId,
+          timestamp: m.timestamp,
+        })
+        .then(({ error }) => {
+          if (!error) return "ok";
+          const isDup =
+            String(error.code ?? "") === "23505" ||
+            error.message?.toLowerCase().includes("duplicate");
+          return isDup ? "dup" : "err";
+        });
+
+      // Also log to admin_chat_messages for the chat window
+      const chatInsertP = (async () => {
+        try {
+          await supabase.from("admin_chat_messages").insert({
+            phone: m.from,
+            direction: "inbound",
+            message: dbText,
+            wa_message_id: m.messageId,
+          });
+        } catch { /* non-critical */ }
+      })();
+
+      // Start routing immediately — don't wait for the insert
+      const routeP = routeReply(m, supabase);
+
+      const [insertStatus] = await Promise.all([insertP, routeP, chatInsertP]);
+
+      if (insertStatus === "dup") {
+        console.log("whatsapp webhook: dup", m.messageId);
       }
-      console.error("whatsapp webhook: supabase insert", insertError);
-    }
-
-    await routeReply(m, supabase);
-  }
+    })
+  );
 
   return NextResponse.json(
     { ok: true, processed: messages.length },

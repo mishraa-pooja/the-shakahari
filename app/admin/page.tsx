@@ -62,12 +62,40 @@ export default function AdminPage() {
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
+  // Per-item stock management
+  const [stockItems, setStockItems] = useState<Record<string, number>>({});
+  const [stockTotal, setStockTotal] = useState<number | null>(null);
+  const [waitlistCount, setWaitlistCount] = useState(0);
+  const [stockUpdating, setStockUpdating] = useState<string | null>(null);
+  const [stockInputs, setStockInputs] = useState<Record<string, string>>({});
+
   useEffect(() => {
     const saved = sessionStorage.getItem("shaka-admin-secret");
     if (saved) {
       setSecret(saved);
       setAuthenticated(true);
     }
+  }, []);
+
+  const fetchStock = useCallback(async (adminSecret: string) => {
+    try {
+      const res = await fetch("/api/admin/stock", {
+        headers: { "x-admin-secret": adminSecret },
+      });
+      const data = await res.json();
+      if (res.ok) {
+        const items = data.items ?? {};
+        setStockItems(items);
+        setStockTotal(data.total ?? 0);
+        setWaitlistCount(data.waitlistCount ?? 0);
+        setStockInputs((prev) => {
+          const next: Record<string, string> = {};
+          for (const [k, v] of Object.entries(items))
+            next[k] = prev[k] !== undefined ? prev[k] : String(v);
+          return next;
+        });
+      }
+    } catch { /* non-critical */ }
   }, []);
 
   const fetchOrders = useCallback(
@@ -100,11 +128,15 @@ export default function AdminPage() {
   useEffect(() => {
     if (!authenticated) return;
     void fetchOrders(secret);
-    pollRef.current = setInterval(() => void fetchOrders(secret), POLL_INTERVAL);
+    void fetchStock(secret);
+    pollRef.current = setInterval(() => {
+      void fetchOrders(secret);
+      void fetchStock(secret);
+    }, POLL_INTERVAL);
     return () => {
       if (pollRef.current) clearInterval(pollRef.current);
     };
-  }, [authenticated, secret, fetchOrders]);
+  }, [authenticated, secret, fetchOrders, fetchStock]);
 
   const handleLogin = (e: React.FormEvent) => {
     e.preventDefault();
@@ -141,6 +173,50 @@ export default function AdminPage() {
       toast.success(`Order ${orderId} → ${STATUS_MAP[newStatus]?.label ?? newStatus}`);
     } catch {
       toast.error("Network error");
+    }
+  };
+
+  const ITEM_LABELS: Record<string, string> = {
+    "paneer-biryani": "Paneer",
+    "veg-dum-biryani": "Signature Veg",
+    "soya-chaap-biryani": "Soya Chaap",
+    "mushroom-biryani": "Mushroom",
+  };
+
+  const updateItemStock = async (itemId: string, val: number) => {
+    if (val < 0) return;
+    setStockUpdating(itemId);
+    try {
+      const res = await fetch("/api/admin/stock", {
+        method: "PATCH",
+        headers: {
+          "Content-Type": "application/json",
+          "x-admin-secret": secret,
+        },
+        body: JSON.stringify({ itemId, stock: val }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        toast.error(data.error ?? "Failed to update");
+        return;
+      }
+      const newItems = data.items ?? {};
+      setStockItems(newItems);
+      setStockTotal(data.total ?? 0);
+      // Sync input fields with server values
+      const inputs: Record<string, string> = {};
+      for (const [k, v] of Object.entries(newItems)) inputs[k] = String(v);
+      setStockInputs(inputs);
+      if (data.notified > 0) {
+        toast.success(`Notified ${data.notified} people on WhatsApp!`);
+        setWaitlistCount(0);
+      }
+      toast.success(`${ITEM_LABELS[itemId] ?? itemId}: ${val}`);
+    } catch (err) {
+      console.error("stock update error:", err);
+      toast.error("Network error");
+    } finally {
+      setStockUpdating(null);
     }
   };
 
@@ -215,6 +291,18 @@ export default function AdminPage() {
             <h1 className="font-brand-serif text-lg">Orders</h1>
           </div>
           <div className="flex items-center gap-3">
+            <Link
+              href="/admin/feedback"
+              className="rounded-md border border-gold/30 px-3 py-1 text-xs transition hover:bg-gold/10"
+            >
+              Feedback
+            </Link>
+            <Link
+              href="/admin/chat"
+              className="rounded-md border border-gold/30 px-3 py-1 text-xs transition hover:bg-gold/10"
+            >
+              Chat
+            </Link>
             <span className="text-xs text-gold/50">{total} total</span>
             <button
               type="button"
@@ -240,6 +328,103 @@ export default function AdminPage() {
       </header>
 
       <div className="mx-auto max-w-6xl px-4 py-4">
+        {/* Per-item Stock Control */}
+        <div className="mb-5 rounded-lg border border-gold/25 bg-forest p-4">
+          <div className="mb-3 flex items-center justify-between">
+            <div className="flex items-center gap-3">
+              <span className="text-xs font-medium uppercase tracking-wider text-gold/50">
+                Total Boxes
+              </span>
+              <span
+                className={`text-2xl font-bold ${
+                  stockTotal === 0
+                    ? "text-red-400"
+                    : (stockTotal ?? 0) <= 5
+                      ? "text-orange-400"
+                      : "text-gold"
+                }`}
+              >
+                {stockTotal ?? "–"}
+              </span>
+              {stockTotal === 0 && (
+                <span className="rounded-full bg-red-500/20 px-2 py-0.5 text-[10px] font-medium text-red-300">
+                  SOLD OUT
+                </span>
+              )}
+            </div>
+            {waitlistCount > 0 && (
+              <span className="text-xs text-gold/50">
+                {waitlistCount} on waitlist
+              </span>
+            )}
+          </div>
+
+          <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+            {Object.entries(ITEM_LABELS).map(([itemId, label]) => {
+              const count = stockItems[itemId] ?? 0;
+              const isUpdating = stockUpdating === itemId;
+              const inputVal = stockInputs[itemId] ?? String(count);
+              return (
+                <div
+                  key={itemId}
+                  className="rounded-md border border-gold/15 bg-forest-dark/40 p-3"
+                >
+                  <p className="mb-2 text-[11px] font-medium text-gold/60">
+                    {label}
+                  </p>
+                  <div className="flex items-center gap-1">
+                    <button
+                      type="button"
+                      disabled={isUpdating || count <= 0}
+                      onClick={() =>
+                        void updateItemStock(itemId, Math.max(0, count - 1))
+                      }
+                      className="rounded border border-gold/20 px-2 py-1 text-sm text-gold/60 transition hover:bg-gold/10 disabled:opacity-30"
+                    >
+                      −
+                    </button>
+                    <input
+                      type="number"
+                      min="0"
+                      className={`w-14 rounded border border-gold/25 bg-forest px-1 py-1 text-center text-base font-bold outline-none focus:border-gold/60 ${
+                        count === 0 ? "text-red-400" : "text-gold"
+                      }`}
+                      value={isUpdating ? "…" : inputVal}
+                      onChange={(e) =>
+                        setStockInputs((prev) => ({
+                          ...prev,
+                          [itemId]: e.target.value,
+                        }))
+                      }
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter") {
+                          const v = parseInt(inputVal, 10);
+                          if (!isNaN(v) && v >= 0)
+                            void updateItemStock(itemId, v);
+                        }
+                      }}
+                      onBlur={() => {
+                        const v = parseInt(inputVal, 10);
+                        if (!isNaN(v) && v >= 0 && v !== count)
+                          void updateItemStock(itemId, v);
+                      }}
+                      disabled={isUpdating}
+                    />
+                    <button
+                      type="button"
+                      disabled={isUpdating}
+                      onClick={() => void updateItemStock(itemId, count + 1)}
+                      className="rounded border border-gold/20 px-2 py-1 text-sm text-gold/60 transition hover:bg-gold/10 disabled:opacity-30"
+                    >
+                      +
+                    </button>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+
         <div className="mb-4 flex flex-wrap gap-2">
           <button
             type="button"

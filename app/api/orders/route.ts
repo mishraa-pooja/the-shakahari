@@ -7,6 +7,7 @@ import { orderPayloadSchema } from "@/lib/validations";
 import { getSupabase, getSupabaseServiceRole } from "@/lib/supabase";
 import { generateOrderId } from "@/lib/orderId";
 import { upsertCustomerOrderAnalytics } from "@/lib/customer-order-analytics";
+import { getAllStock, decrementItemStock } from "@/lib/stock";
 
 export async function POST(request: Request) {
   try {
@@ -24,6 +25,50 @@ export async function POST(request: Request) {
 
     try {
       const supabase = getSupabase();
+      const serviceDb = getSupabaseServiceRole() ?? supabase;
+
+      // Per-item stock check
+      const biryanis = data.items.filter(
+        (i: { id: string }) =>
+          i.id !== "raita" && i.id !== "gulab-jamun"
+      );
+
+      if (biryanis.length > 0) {
+        const stockMap = await getAllStock(serviceDb);
+        const insufficient: string[] = [];
+
+        for (const item of biryanis) {
+          const avail = stockMap[item.id] ?? 0;
+          if (avail < item.quantity) {
+            insufficient.push(
+              avail <= 0
+                ? `${item.name} is sold out`
+                : `Only ${avail} ${item.name} left (you ordered ${item.quantity})`
+            );
+          }
+        }
+
+        if (insufficient.length > 0) {
+          return NextResponse.json(
+            { error: insufficient.join(". ") + "." },
+            { status: 409 }
+          );
+        }
+
+        for (const item of biryanis) {
+          const result = await decrementItemStock(
+            serviceDb,
+            item.id,
+            item.quantity
+          );
+          if (result < 0) {
+            return NextResponse.json(
+              { error: `${item.name} just sold out. Please refresh and try again.` },
+              { status: 409 }
+            );
+          }
+        }
+      }
 
       const { count } = await supabase
         .from("orders")

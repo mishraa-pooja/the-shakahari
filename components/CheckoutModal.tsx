@@ -163,7 +163,20 @@ export function CheckoutModal({ open, onOpenChange }: CheckoutModalProps) {
       const json = await res.json();
 
       if (!res.ok) {
-        toast.error(json.error ?? "Something went wrong.");
+        if (res.status === 409) {
+          toast.error(json.error ?? "Sold out!", {
+            duration: 8000,
+            style: {
+              background: "#7f1d1d",
+              color: "#fecaca",
+              border: "1px solid #dc2626",
+              fontWeight: 700,
+              fontSize: "15px",
+            },
+          });
+        } else {
+          toast.error(json.error ?? "Something went wrong.");
+        }
         return;
       }
 

@@ -4,12 +4,18 @@ import React, { useEffect, useState } from "react";
 import Image from "next/image";
 
 const MENU_SECTION_ID = "menu";
+const WA_NUMBER = process.env.NEXT_PUBLIC_WHATSAPP_NUMBER?.replace(/\D/g, "");
 
 export function HeroVideoSection() {
   const [showVideo, setShowVideo] = useState(false);
+  const [stock, setStock] = useState<number | null>(null);
 
   useEffect(() => {
     setShowVideo(true);
+    fetch("/api/stock", { cache: "no-store" })
+      .then((r) => r.json())
+      .then((d) => setStock(d.total ?? 0))
+      .catch(() => {});
   }, []);
 
   const scrollToMenu = (e: React.MouseEvent) => {
@@ -49,10 +55,10 @@ export function HeroVideoSection() {
         )}
       </div>
 
-      {/* Lighter overlay so biryani pops */}
+      {/* Overlay */}
       <div className="heroOverlay absolute inset-0" />
 
-      {/* Subtle texture overlay */}
+      {/* Texture */}
       <div
         className="absolute inset-0 opacity-20 mix-blend-overlay"
         style={{
@@ -65,9 +71,16 @@ export function HeroVideoSection() {
       {/* Content */}
       <div
         className="relative z-10 mx-auto flex max-w-5xl flex-col items-center px-6 text-center"
-        style={{ paddingTop: "140px" }}
+        style={{ paddingTop: "120px" }}
       >
-        {/* Logo left + wordmark right */}
+        {/* "First time in Kharghar" tag */}
+        <span
+          className="mb-4 inline-block rounded-full border border-gold/40 bg-gold/10 px-5 py-1.5 text-xs font-bold uppercase tracking-[0.25em] text-gold backdrop-blur-sm"
+        >
+          First Time in Kharghar
+        </span>
+
+        {/* Logo + Wordmark */}
         <div className="flex items-center justify-center" style={{ gap: 0 }}>
           <div
             className="relative shrink-0"
@@ -113,7 +126,6 @@ export function HeroVideoSection() {
                 SHAKA-HARI
               </span>
             </div>
-            {/* Ownership — visible above the fold for business verification */}
             <p
               className="mt-2 text-center text-sm tracking-wide text-gold/70"
               style={{
@@ -136,7 +148,6 @@ export function HeroVideoSection() {
               Veg Dum Biryani Co.
             </div>
           </div>
-          {/* Invisible spacer matching logo width */}
           <div
             className="shrink-0"
             style={{ width: "clamp(130px, 15vw, 210px)" }}
@@ -144,19 +155,38 @@ export function HeroVideoSection() {
           />
         </div>
 
-        {/* Subcopy */}
+        {/* Scarcity line — live stock */}
         <p
-          className="mt-6 max-w-xl"
+          className="mt-6 max-w-xl font-semibold"
           style={{
             fontFamily:
               "ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif",
-            color: "rgba(255,255,255,0.92)",
+            color: stock !== null && stock <= 0 ? "#f87171" : "#f0d878",
+            fontSize: "17px",
+            lineHeight: 1.6,
+            letterSpacing: "0.03em",
+          }}
+        >
+          {stock === null
+            ? "Limited boxes today. That\u2019s it."
+            : stock <= 0
+              ? "Sorry, we\u2019re sold out for today!"
+              : `Only ${stock} ${stock === 1 ? "box" : "boxes"} left today. That\u2019s it.`}
+        </p>
+
+        {/* Value reassurance */}
+        <p
+          className="mt-2 max-w-xl"
+          style={{
+            fontFamily:
+              "ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif",
+            color: "rgba(255,255,255,0.88)",
             fontSize: "15px",
             lineHeight: 1.7,
             letterSpacing: "0.04em",
           }}
         >
-          Dum-cooked. Pure veg. Andhra soul.
+          Feels full. Tastes premium. Worth every bite.
         </p>
 
         {/* Divider */}
@@ -165,11 +195,12 @@ export function HeroVideoSection() {
           style={{
             width: 80,
             height: 2,
-            background: "linear-gradient(90deg, transparent, rgba(240, 216, 120, 0.6), transparent)",
+            background:
+              "linear-gradient(90deg, transparent, rgba(240, 216, 120, 0.6), transparent)",
           }}
         />
 
-        {/* CTA */}
+        {/* CTAs */}
         <div className="mt-8 flex flex-wrap justify-center gap-4">
           <a
             href={`#${MENU_SECTION_ID}`}
@@ -185,7 +216,8 @@ export function HeroVideoSection() {
               letterSpacing: "0.04em",
               boxShadow:
                 "0 4px 20px rgba(214, 177, 91, 0.3), 0 20px 50px rgba(0,0,0,0.4)",
-              transition: "transform 0.2s ease, box-shadow 0.2s ease, filter 0.2s ease",
+              transition:
+                "transform 0.2s ease, box-shadow 0.2s ease, filter 0.2s ease",
             }}
             onMouseEnter={(e) => {
               e.currentTarget.style.transform = "translateY(-2px)";
@@ -200,12 +232,18 @@ export function HeroVideoSection() {
               e.currentTarget.style.filter = "brightness(1)";
             }}
           >
-            Order Now
+            {stock !== null && stock <= 0 ? "View Menu" : "Reserve Your Box Now"}
           </a>
 
           <a
-            href={`#${MENU_SECTION_ID}`}
-            onClick={scrollToMenu}
+            href={
+              WA_NUMBER
+                ? `https://wa.me/${WA_NUMBER}?text=${encodeURIComponent("Hi! I'd like to place an order.")}`
+                : `#${MENU_SECTION_ID}`
+            }
+            target={WA_NUMBER ? "_blank" : undefined}
+            rel={WA_NUMBER ? "noopener noreferrer" : undefined}
+            onClick={WA_NUMBER ? undefined : scrollToMenu}
             className="inline-flex items-center justify-center transition-all duration-200"
             style={{
               background: "rgba(240, 216, 120, 0.08)",
@@ -219,7 +257,7 @@ export function HeroVideoSection() {
               backdropFilter: "blur(4px)",
             }}
           >
-            View Menu
+            Order on WhatsApp
           </a>
         </div>
       </div>

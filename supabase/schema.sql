@@ -114,6 +114,12 @@ CREATE POLICY "Allow insert whatsapp_messages anon"
   TO anon
   WITH CHECK (true);
 
+-- Allow service_role full access
+DROP POLICY IF EXISTS "Service role full access whatsapp_messages" ON public.whatsapp_messages;
+CREATE POLICY "Service role full access whatsapp_messages"
+  ON public.whatsapp_messages FOR ALL TO service_role
+  USING (true) WITH CHECK (true);
+
 COMMENT ON TABLE public.whatsapp_messages IS 'Inbound WhatsApp Cloud API text messages';
 
 -- ─────────────────────────────────────────────────────────────────────────────
@@ -144,6 +150,12 @@ ALTER TABLE public.phone_verified_profiles ENABLE ROW LEVEL SECURITY;
 
 -- No anon/authenticated policies: server writes only via service_role (bypasses RLS).
 
+-- Service role full access for server-side writes
+DROP POLICY IF EXISTS "Service role full access phone_verified_profiles" ON public.phone_verified_profiles;
+CREATE POLICY "Service role full access phone_verified_profiles"
+  ON public.phone_verified_profiles FOR ALL TO service_role
+  USING (true) WITH CHECK (true);
+
 COMMENT ON TABLE public.phone_verified_profiles IS
   'Phone numbers that completed WhatsApp OTP; not linked to auth.users';
 
@@ -163,6 +175,11 @@ CREATE TABLE IF NOT EXISTS public.whatsapp_order_sessions (
 );
 
 ALTER TABLE public.whatsapp_order_sessions ENABLE ROW LEVEL SECURITY;
+
+DROP POLICY IF EXISTS "Service role full access whatsapp_order_sessions" ON public.whatsapp_order_sessions;
+CREATE POLICY "Service role full access whatsapp_order_sessions"
+  ON public.whatsapp_order_sessions FOR ALL TO service_role
+  USING (true) WITH CHECK (true);
 
 COMMENT ON TABLE public.whatsapp_order_sessions IS
   'Conversation state for WhatsApp ordering flow; server writes via service_role';
@@ -191,8 +208,103 @@ CREATE INDEX IF NOT EXISTS idx_customer_order_analytics_total_orders
 
 ALTER TABLE public.customer_order_analytics ENABLE ROW LEVEL SECURITY;
 
+DROP POLICY IF EXISTS "Service role full access customer_order_analytics" ON public.customer_order_analytics;
+CREATE POLICY "Service role full access customer_order_analytics"
+  ON public.customer_order_analytics FOR ALL TO service_role
+  USING (true) WITH CHECK (true);
+
 COMMENT ON TABLE public.customer_order_analytics IS
   'Aggregated order counts and dish frequency per phone; server writes via service_role';
+
+-- ─────────────────────────────────────────────────────────────────────────────
+-- Store config (key-value for stock count, settings, etc.)
+-- ─────────────────────────────────────────────────────────────────────────────
+CREATE TABLE IF NOT EXISTS public.store_config (
+  key TEXT NOT NULL PRIMARY KEY,
+  value TEXT NOT NULL DEFAULT '',
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+ALTER TABLE public.store_config ENABLE ROW LEVEL SECURITY;
+
+DROP POLICY IF EXISTS "Allow anon select store_config" ON public.store_config;
+CREATE POLICY "Allow anon select store_config"
+  ON public.store_config FOR SELECT TO anon
+  USING (true);
+
+DROP POLICY IF EXISTS "Service role full access store_config" ON public.store_config;
+CREATE POLICY "Service role full access store_config"
+  ON public.store_config FOR ALL TO service_role
+  USING (true) WITH CHECK (true);
+
+INSERT INTO public.store_config (key, value)
+VALUES
+  ('stock:paneer-biryani', '5'),
+  ('stock:veg-dum-biryani', '5'),
+  ('stock:soya-chaap-biryani', '5'),
+  ('stock:mushroom-biryani', '5')
+ON CONFLICT (key) DO NOTHING;
+
+COMMENT ON TABLE public.store_config IS 'Key-value config: biryani_stock, etc.';
+
+-- ─────────────────────────────────────────────────────────────────────────────
+-- Stock waitlist — notify these phones when stock is back
+-- ─────────────────────────────────────────────────────────────────────────────
+CREATE TABLE IF NOT EXISTS public.stock_waitlist (
+  phone TEXT NOT NULL PRIMARY KEY,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+ALTER TABLE public.stock_waitlist ENABLE ROW LEVEL SECURITY;
+
+DROP POLICY IF EXISTS "Allow anon insert stock_waitlist" ON public.stock_waitlist;
+CREATE POLICY "Allow anon insert stock_waitlist"
+  ON public.stock_waitlist FOR INSERT TO anon
+  WITH CHECK (true);
+
+DROP POLICY IF EXISTS "Service role full access stock_waitlist" ON public.stock_waitlist;
+CREATE POLICY "Service role full access stock_waitlist"
+  ON public.stock_waitlist FOR ALL TO service_role
+  USING (true) WITH CHECK (true);
+
+COMMENT ON TABLE public.stock_waitlist IS 'Phones to notify when biryani stock is replenished';
+
+-- ─────────────────────────────────────────────────────────────────────────────
+-- Admin chat messages (two-way WhatsApp conversation log)
+-- ─────────────────────────────────────────────────────────────────────────────
+CREATE TABLE IF NOT EXISTS public.admin_chat_messages (
+  id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+  phone TEXT NOT NULL,
+  direction TEXT NOT NULL CHECK (direction IN ('inbound', 'outbound')),
+  message TEXT NOT NULL,
+  admin_name TEXT DEFAULT 'Admin',
+  wa_message_id TEXT,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS idx_admin_chat_messages_phone_created
+  ON public.admin_chat_messages (phone, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_admin_chat_messages_created
+  ON public.admin_chat_messages (created_at DESC);
+
+ALTER TABLE public.admin_chat_messages ENABLE ROW LEVEL SECURITY;
+
+DROP POLICY IF EXISTS "Service role full access admin_chat_messages" ON public.admin_chat_messages;
+CREATE POLICY "Service role full access admin_chat_messages"
+  ON public.admin_chat_messages FOR ALL TO service_role
+  USING (true) WITH CHECK (true);
+
+DROP POLICY IF EXISTS "Allow anon insert admin_chat_messages" ON public.admin_chat_messages;
+CREATE POLICY "Allow anon insert admin_chat_messages"
+  ON public.admin_chat_messages FOR INSERT TO anon
+  WITH CHECK (true);
+
+DROP POLICY IF EXISTS "Allow anon select admin_chat_messages" ON public.admin_chat_messages;
+CREATE POLICY "Allow anon select admin_chat_messages"
+  ON public.admin_chat_messages FOR SELECT TO anon
+  USING (true);
+
+COMMENT ON TABLE public.admin_chat_messages IS 'Two-way WhatsApp chat log for admin direct messaging';
 
 -- ─────────────────────────────────────────────────────────────────────────────
 -- User profiles (Supabase Auth)

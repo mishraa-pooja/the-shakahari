@@ -7,6 +7,10 @@ export interface MenuItem {
   name: string;
   description: string;
   price: number;
+  /** Strikethrough "was" price shown above the final price */
+  originalPrice?: number;
+  /** Badge text shown on the card, e.g. "Chef's Recommendation" */
+  badge?: string;
   /** Path under public/, e.g. /images/PaneerBiryani.png */
   image?: string;
 }

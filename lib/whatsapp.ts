@@ -113,8 +113,11 @@ export async function sendGreeting(to: string): Promise<WaResult> {
   });
 }
 
-/** Interactive list with menu sections — items sourced from menuData. */
-export async function sendMenu(to: string): Promise<WaResult> {
+/** Interactive list with menu sections — items sourced from menuData, per-item stock shown. */
+export async function sendMenu(
+  to: string,
+  stockMap?: Record<string, number>
+): Promise<WaResult> {
   const toDigits = normalizePhone(to);
   if (!toDigits) return { ok: false, error: "Invalid recipient" };
 
@@ -127,10 +130,16 @@ export async function sendMenu(to: string): Promise<WaResult> {
     (i) => !i.name.toLowerCase().includes("biryani")
   );
 
+  const stockLabel = (id: string) => {
+    if (!stockMap || stockMap[id] === undefined) return "";
+    if (stockMap[id] <= 0) return " ❌ SOLD OUT";
+    return ` (${stockMap[id]} left)`;
+  };
+
   const toRow = (item: (typeof menuItems)[number]) => ({
     id: `ITEM_${item.id.toUpperCase().replace(/-/g, "_")}`,
     title: item.name,
-    description: `₹${item.price} — ${item.description.slice(0, 60)}`,
+    description: `₹${item.price}${stockLabel(item.id)} — ${item.description.slice(0, 50)}`,
   });
 
   const sections: { title: string; rows: ReturnType<typeof toRow>[] }[] = [];
@@ -141,16 +150,32 @@ export async function sendMenu(to: string): Promise<WaResult> {
     sections.push({ title: "Sides & Desserts", rows: others.map(toRow) });
   }
 
+  const numbered = menuItems
+    .map((m, i) => `${i + 1}. ${m.name} — ₹${m.price}${stockLabel(m.id)}`)
+    .join("\n");
+
+  const totalStock = stockMap
+    ? Object.values(stockMap).reduce((a, b) => a + b, 0)
+    : null;
+
+  const stockLine =
+    totalStock != null && totalStock > 0
+      ? `\n\n\u{1F525} *Only ${totalStock} ${totalStock === 1 ? "box" : "boxes"} left today!*`
+      : "";
+
   return postMessage({
     to: toDigits,
     type: "interactive",
     interactive: {
       type: "list",
       body: {
-        text: "Here's our menu 🌿 Tap a category to explore:",
+        text:
+          `Here's our menu \u{1F33F}\n\n${numbered}${stockLine}\n\n` +
+          `*Quick order:* Type items with quantity!\n` +
+          `e.g. _2 paneer, 1 mushroom, 1 raita_`,
       },
       action: {
-        button: "View Menu",
+        button: "Tap to Select",
         sections,
       },
     },
